@@ -5,7 +5,7 @@ ___practice design patterns below___
 - composite pattern
 - state pattern
 - visitor pattern
-## StateTransitParser
+## State Transit Parser
 ___practice design patterns below___
 - builder pattern
 - composite pattern
