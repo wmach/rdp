@@ -1,0 +1,215 @@
+/**逆ポーランド記法(reverse polish notation parser)*/
+import java.io.*;
+import java.util.Stack;
+final class Constants{
+    public static final class Argument{
+        public static int NUMBER_OF_ARGUMENTS = 1;
+        public static int FILE_NAME = 0;
+    }
+}
+public class ReversePolishNotationParser{
+    static class Pstate{
+        public boolean isStdin = false;
+    }
+    static Pstate PROCESS_STATE = new Pstate();//入力が標準出力とファイルのどちらかを保持
+    public static void main( final String[] args){
+        ReversePolishNotationParser rpnp = new ReversePolishNotationParser();
+        if ( rpnp.validateArguments( args) == false ){
+            rpnp.displayHelp();
+            System.exit(1);
+        }
+        if ( rpnp.doOperation( args) == false ){
+            System.exit(1);
+        }
+        System.exit(0);
+    }
+    public boolean doOperation( final String[] args){
+        boolean rtn = true;
+        ParseTree tree = null;
+        StreamTokenizer st = null;
+        Parser p = null;
+        EvaluateVisitor ev = new EvaluateVisitor();
+        try{
+            BufferedReader br = null;
+            if ( PROCESS_STATE.isStdin == true){
+                br = new BufferedReader(new InputStreamReader(System.in));
+            }else{
+                br = new BufferedReader(new InputStreamReader(new FileInputStream( args[Constants.Argument.FILE_NAME])));
+            }
+            p = new Parser(st=new StreamTokenizer(br));
+            for (;;){
+                tree = p.parse();
+                if (tree == null){
+                    break;
+                }
+                System.out.println(tree + " = " + tree.accept(ev));
+                System.out.println(
+                      tree.reversePolishNotation("")
+                    + " = "
+                    + Integer.toString( (int)tree.accept(ev))
+                );
+            }
+        }catch(Exception e){
+            e.printStackTrace();
+            rtn = false;
+        }
+        return rtn;
+    }
+    public boolean validateArguments( final String[] args){
+        if ( args.length < Constants.Argument.NUMBER_OF_ARGUMENTS ){
+            PROCESS_STATE.isStdin = true;
+        }else{
+            PROCESS_STATE.isStdin = false;
+            File file = new File(args[Constants.Argument.FILE_NAME]);
+            return file.canRead();
+        }
+        return true;
+    }
+    public void displayHelp(){
+        System.out.println(this.getClass().getName()+" [ formula file | standard output ]");
+    }
+}
+
+interface ParseTree{
+    public double accept(EvaluateVisitor EvaluateVisitor);
+    public String reversePolishNotation( String s);
+}
+final class ParseTreeNumeric implements ParseTree{
+    private double nval = 0;
+    ParseTreeNumeric( double x){ nval=x;}
+    public double getNval(){ return nval;}
+    public double accept( EvaluateVisitor v){ return v.eval(this);}
+    public String reversePolishNotation(String s){ return s.concat(Integer.toString( (int)nval) + " ");}
+    public String toString(){ return Integer.toString( (int)nval);}
+}
+final class ParseTreeBinary implements ParseTree{
+    private Algorithm a = null;
+    private ParseTree arg1 = null;
+    private ParseTree arg2 = null;
+    ParseTreeBinary( Algorithm a, ParseTree x, ParseTree y){ this.a=a; this.arg1=x; this.arg2=y;}
+    public Algorithm getAlgorithm(){ return this.a;}
+    public ParseTree getArg1(){ return this.arg1;}
+    public ParseTree getArg2(){ return this.arg2;}
+    public double accept( EvaluateVisitor v){ return v.eval(this);}
+    public String reversePolishNotation(String s){
+        return arg2.reversePolishNotation(
+            arg1.reversePolishNotation(s))
+            + a.toString()
+            + " ";
+    }
+    public String toString(){ return "(" + arg1 + a + arg2 + ")";}
+}
+
+interface Algorithm{ public double doOperate(double d1, double d2);}
+class AlgorithmAdd implements Algorithm{ public double doOperate(double d1, double d2){ return d1 + d2;} public String toString(){ return "+";}}
+class AlgorithmSubtract implements Algorithm{ public double doOperate(double d1, double d2){ return d1 - d2;} public String toString(){ return "-";}}
+class AlgorithmMultiply implements Algorithm{ public double doOperate(double d1, double d2){ return d1 * d2;} public String toString(){ return "*";}}
+class AlgorithmDivide implements Algorithm{ public double doOperate(double d1, double d2){ return d1 / d2;} public String toString(){ return "/";}}
+
+class ParserConstants{
+    static final int EOF = StreamTokenizer.TT_EOF;
+    static final int EOL = StreamTokenizer.TT_EOL;
+    static final int NUMBER = StreamTokenizer.TT_NUMBER;
+    static final int WORD = StreamTokenizer.TT_WORD;
+}
+class Parser{
+    private Stack stack = null;
+    StreamTokenizer scanner = null;
+
+    Parser(StreamTokenizer st){
+        this.scanner = st;
+        scanner.ordinaryChar( '-' );
+        scanner.ordinaryChar( '/' );
+        scanner.slashStarComments( true );
+        scanner.slashSlashComments( true );
+        scanner.eolIsSignificant( true );
+        stack = new Stack();
+    }
+
+    ParseTree parse() throws IOException, ParserException{
+        ParseTree p = null;
+        while ( true ){
+            scanner.nextToken();
+            if (( scanner.ttype == ParserConstants.EOL ) ||
+                ( scanner.ttype == ParserConstants.EOF )){
+                break;
+            }
+            scanner.pushBack();
+            p = this.read();
+        }
+        return p;
+    }
+
+    public ParseTree read() throws IOException, UnexpectedToken{
+        ParseTree x, y = null;
+        while(true){
+            switch (scanner.nextToken()){
+            case ParserConstants.EOF:
+            case ParserConstants.EOL:
+                return (ParseTree)stack.pop();
+            case '+':
+                if (stack.isEmpty()==true){
+                    throw new UnexpectedToken(scanner.sval);
+                }
+                y = (ParseTree)stack.pop();
+                x = (ParseTree)stack.pop();
+                stack.push(new ParseTreeBinary(new AlgorithmAdd(), x, y));
+                break;
+            case '-':
+                if (stack.isEmpty()==true){
+                    throw new UnexpectedToken(scanner.sval);
+                }
+                y = (ParseTree)stack.pop();
+                x = (ParseTree)stack.pop();
+                stack.push(new ParseTreeBinary(new AlgorithmSubtract(), x, y));
+                break;
+            case '*':
+                if (stack.isEmpty()==true){
+                    throw new UnexpectedToken(scanner.sval);
+                }
+                y = (ParseTree)stack.pop();
+                x = (ParseTree)stack.pop();
+                stack.push(new ParseTreeBinary(new AlgorithmMultiply(), x, y));
+                break;
+            case '/':
+                if (stack.isEmpty()==true){
+                    throw new UnexpectedToken(scanner.sval);
+                }
+                y = (ParseTree)stack.pop();
+                x = (ParseTree)stack.pop();
+                stack.push(new ParseTreeBinary(new AlgorithmDivide(), x, y));
+                break;
+            case ParserConstants.NUMBER:
+                stack.push(new ParseTreeNumeric(scanner.nval));
+                break;
+            case ParserConstants.WORD:
+                throw new UnexpectedToken(scanner.sval);
+            default:
+                throw new UnexpectedToken( (char)scanner.ttype);
+            }
+        }
+    }
+}
+class EvaluateVisitor{
+    double eval(ParseTreeNumeric t){ return t.getNval();}
+    double eval(ParseTreeBinary t){
+        return t.getAlgorithm().doOperate(t.getArg1().accept(this), t.getArg2().accept(this));
+    }
+}
+class ParserException extends Exception{
+    ParserException(){ super();}
+    ParserException(String s){ super(s);}
+}
+class SyntaxError extends ParserException{
+    SyntaxError(){ super();}
+    SyntaxError(String s){ super(s);}
+}
+class UnexpectedToken extends ParserException{
+    UnexpectedToken(char c){ super("" + c);}
+    UnexpectedToken(double x){ super("" + x);}
+    UnexpectedToken(String s){ super(s);}
+    UnexpectedToken(char c, String s){ super(c + s + c);}
+}
+class InterpreterException extends RuntimeException{
+    InterpreterException(String s){ super(s);}
+}
